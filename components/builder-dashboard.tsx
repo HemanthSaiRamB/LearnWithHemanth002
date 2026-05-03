@@ -1,3 +1,5 @@
+"use client";
+
 import {
   BookOpen,
   CalendarDays,
@@ -11,18 +13,26 @@ import {
   Wrench
 } from "lucide-react";
 import type { ElementType, ReactNode } from "react";
+import { useMemo, useState } from "react";
 import clsx from "clsx";
 import { END_DATE, START_DATE, coreSources, coverageMap, daysBetween, formatRange, sprints, toDate, type Sprint } from "@/lib/plan";
 import { ThemeToggle } from "@/components/theme-toggle";
 
+const GITHUB_SOURCE_URL = "https://github.com/HemanthSaiRamB/30DaySprint";
+
 const sideHustleLinks = [
   { label: "ChatGPT", url: "https://chatgpt.com/" },
   { label: "LinkedIn", url: "https://www.linkedin.com/" },
-  { label: "GitHub", url: "https://github.com/" },
+  { label: "Project source", url: GITHUB_SOURCE_URL },
   { label: "Chess.com", url: "https://www.chess.com/" },
   { label: "YouTube", url: "https://www.youtube.com/" },
   { label: "Educative.io", url: "https://www.educative.io/" }
 ];
+
+type ScheduledSprint = Sprint & {
+  start: string;
+  end: string;
+};
 
 function dateKey(date: Date) {
   const year = date.getFullYear();
@@ -31,23 +41,53 @@ function dateKey(date: Date) {
   return `${year}-${month}-${day}`;
 }
 
-function currentSprintId() {
+function addDays(date: Date, amount: number) {
+  const next = new Date(date);
+  next.setDate(next.getDate() + amount);
+  return next;
+}
+
+function getDefaultEndDate(startDate: string) {
+  return dateKey(addDays(toDate(startDate), 29));
+}
+
+function buildSchedule(startDate: string, endDate: string): ScheduledSprint[] {
+  const start = toDate(startDate);
+  const end = toDate(endDate);
+  const totalDays = Math.max(daysBetween(start, end) + 1, 1);
+  const sprintCount = sprints.length;
+
+  return sprints.map((sprint, index) => {
+    const startOffset = Math.floor((index * totalDays) / sprintCount);
+    const nextStartOffset = Math.floor(((index + 1) * totalDays) / sprintCount);
+    const endOffset = Math.max(startOffset, nextStartOffset - 1);
+
+    return {
+      ...sprint,
+      start: dateKey(addDays(start, startOffset)),
+      end: dateKey(addDays(start, Math.min(endOffset, totalDays - 1)))
+    };
+  });
+}
+
+function currentSprintId(schedule: ScheduledSprint[], startDate: string, endDate: string) {
   const now = new Date();
-  const active = sprints.find((sprint) => toDate(sprint.start) <= now && now <= toDate(sprint.end));
+  const active = schedule.find((sprint) => toDate(sprint.start) <= now && now <= toDate(sprint.end));
   if (active) return active.id;
-  if (now < toDate(START_DATE)) return 1;
-  return 15;
+  if (now < toDate(startDate)) return schedule[0]?.id ?? 1;
+  if (now > toDate(endDate)) return schedule.at(-1)?.id ?? 15;
+  return schedule[0]?.id ?? 1;
 }
 
-function remainingDays() {
-  const days = daysBetween(new Date(), toDate(END_DATE)) + 1;
-  return Math.min(Math.max(days, 0), 30);
+function remainingDays(endDate: string, planLength: number) {
+  const days = daysBetween(new Date(), toDate(endDate)) + 1;
+  return Math.min(Math.max(days, 0), planLength);
 }
 
-function calendarDays() {
+function calendarDays(startDate: string, endDate: string) {
   const days: Date[] = [];
-  const cursor = new Date(2026, 3, 27);
-  const end = new Date(2026, 4, 26);
+  const cursor = toDate(startDate);
+  const end = toDate(endDate);
 
   while (cursor <= end) {
     days.push(new Date(cursor));
@@ -55,6 +95,34 @@ function calendarDays() {
   }
 
   return days;
+}
+
+function DateField({
+  id,
+  label,
+  min,
+  value,
+  onChange
+}: {
+  id: string;
+  label: string;
+  min?: string;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label htmlFor={id} className="grid gap-2">
+      <span className="text-xs font-black uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">{label}</span>
+      <input
+        id={id}
+        type="date"
+        min={min}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="focus-ring h-11 rounded-xl border border-black/10 bg-white/75 px-3 text-sm font-bold text-slate-800 shadow-sm transition hover:bg-white dark:border-white/10 dark:bg-black/20 dark:text-slate-100 dark:[color-scheme:dark]"
+      />
+    </label>
+  );
 }
 
 function Metric({ label, value, icon: Icon, accent }: { label: string; value: string; icon: ElementType; accent: string }) {
@@ -92,13 +160,17 @@ function PillList({ items, tone = "neutral" }: { items: string[]; tone?: "neutra
   );
 }
 
-function ResourceLink({ label, url }: { label: string; url: string }) {
+function ResourceLink({ label, url, variant = "default" }: { label: string; url: string; variant?: "default" | "source" }) {
   return (
     <a
       href={url}
       target="_blank"
       rel="noreferrer"
-      className="inline-flex items-center gap-1 rounded-lg bg-white/70 px-2.5 py-1.5 text-xs font-bold text-brand-blue transition hover:-translate-y-0.5 hover:bg-white dark:bg-black/20 dark:text-sky-300"
+      className={clsx(
+        "inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-bold transition hover:-translate-y-0.5",
+        variant === "default" && "bg-white/70 text-brand-blue hover:bg-white dark:bg-black/20 dark:text-sky-300",
+        variant === "source" && "bg-brand-coral text-white shadow-sm shadow-brand-coral/30 hover:bg-red-500 dark:bg-brand-gold dark:text-ink dark:hover:bg-amber-300"
+      )}
     >
       {label}
       <ExternalLink className="size-3" />
@@ -230,9 +302,22 @@ function SprintCard({ sprint, active }: { sprint: Sprint; active: boolean }) {
 }
 
 export function BuilderDashboard() {
-  const activeSprintId = currentSprintId();
-  const activeSprint = sprints.find((sprint) => sprint.id === activeSprintId) ?? sprints[0];
-  const days = calendarDays();
+  const [startDate, setStartDate] = useState(START_DATE);
+  const [endDate, setEndDate] = useState(END_DATE);
+  const planLength = daysBetween(toDate(startDate), toDate(endDate)) + 1;
+  const scheduledSprints = useMemo(() => buildSchedule(startDate, endDate), [startDate, endDate]);
+  const activeSprintId = currentSprintId(scheduledSprints, startDate, endDate);
+  const activeSprint = scheduledSprints.find((sprint) => sprint.id === activeSprintId) ?? scheduledSprints[0];
+  const days = useMemo(() => calendarDays(startDate, endDate), [startDate, endDate]);
+  const planLengthLabel = `${planLength} day${planLength === 1 ? "" : "s"}`;
+  const dateRangeLabel = `${formatRange(startDate, endDate)} · ${planLengthLabel}`;
+
+  function handleStartDateChange(value: string) {
+    setStartDate(value);
+    if (toDate(value) > toDate(endDate)) {
+      setEndDate(getDefaultEndDate(value));
+    }
+  }
 
   return (
     <main className="min-h-screen px-4 py-6 sm:px-6 lg:px-8">
@@ -243,10 +328,10 @@ export function BuilderDashboard() {
               <p className="text-xs font-black uppercase tracking-[0.22em] text-brand-coral">30-Day GenAI Builder Plan</p>
               <h1 className="mt-3 max-w-4xl text-4xl font-black tracking-tight sm:text-6xl">Build 15 GenAI projects in 30 focused days.</h1>
               <div className="mt-6 max-w-3xl rounded-2xl bg-black/5 p-4 dark:bg-white/10">
-                <p className="text-xs font-black uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">Daily links</p>
+                <p className="text-xs font-black uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">Daily links and source code</p>
                 <div className="mt-3 flex flex-wrap gap-2">
                   {sideHustleLinks.map((link) => (
-                    <ResourceLink key={link.url} {...link} />
+                    <ResourceLink key={link.url} {...link} variant={link.url === GITHUB_SOURCE_URL ? "source" : "default"} />
                   ))}
                 </div>
               </div>
@@ -257,11 +342,27 @@ export function BuilderDashboard() {
                 <ThemeToggle />
               </div>
               <div className="grid gap-3 sm:grid-cols-2">
-                <Metric label="Roadmap length" value="30 days" icon={CalendarDays} accent="bg-brand-blue/10 text-brand-blue" />
+                <Metric label="Roadmap length" value={planLengthLabel} icon={CalendarDays} accent="bg-brand-blue/10 text-brand-blue" />
                 <Metric label="Total sprints" value="15" icon={Target} accent="bg-brand-mint/20 text-emerald-600" />
                 <Metric label="Current sprint" value={`#${activeSprint.id}`} icon={Sparkles} accent="bg-brand-coral/20 text-red-500" />
-                <Metric label="Days remaining" value={`${remainingDays()}`} icon={Rocket} accent="bg-brand-gold/20 text-amber-600" />
+                <Metric label="Days remaining" value={`${remainingDays(endDate, planLength)}`} icon={Rocket} accent="bg-brand-gold/20 text-amber-600" />
               </div>
+            </div>
+          </div>
+        </section>
+
+        <section className="mt-6 glass rounded-3xl p-5">
+          <div className="grid gap-5 lg:grid-cols-[1fr_auto] lg:items-end">
+            <div>
+              <p className="text-xs font-black uppercase tracking-[0.18em] text-brand-coral">Customize your plan</p>
+              <h2 className="mt-1 text-2xl font-black tracking-tight">Pick your own sprint dates</h2>
+              <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600 dark:text-slate-300">
+                The 15 project sprints automatically stretch across your selected start and end date.
+              </p>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2 lg:min-w-[28rem]">
+              <DateField id="plan-start" label="Start date" value={startDate} onChange={handleStartDateChange} />
+              <DateField id="plan-end" label="End date" min={startDate} value={endDate} onChange={setEndDate} />
             </div>
           </div>
         </section>
@@ -277,6 +378,7 @@ export function BuilderDashboard() {
             </p>
           </div>
           <div className="mt-5 flex flex-wrap gap-2">
+            <ResourceLink label="Project source code" url={GITHUB_SOURCE_URL} variant="source" />
             {coreSources.map((source) => (
               <ResourceLink key={source.url} {...source} />
             ))}
@@ -292,12 +394,12 @@ export function BuilderDashboard() {
                 <p className="text-xs font-black uppercase tracking-[0.18em] text-brand-coral">Merged dashboard + calendar</p>
                 <h2 className="mt-1 text-2xl font-black tracking-tight">Roadmap timeline</h2>
               </div>
-              <span className="rounded-full bg-black/5 px-3 py-1 text-xs font-bold text-slate-600 dark:bg-white/10 dark:text-slate-300">Apr 27-May 26</span>
+              <span className="rounded-full bg-black/5 px-3 py-1 text-xs font-bold text-slate-600 dark:bg-white/10 dark:text-slate-300">{dateRangeLabel}</span>
             </div>
             <div className="mt-5 grid grid-cols-5 gap-2 sm:grid-cols-6">
               {days.map((day) => {
                 const key = dateKey(day);
-                const sprint = sprints.find((item) => item.start <= key && key <= item.end);
+                const sprint = scheduledSprints.find((item) => item.start <= key && key <= item.end);
                 const active = sprint?.id === activeSprintId;
 
                 return (
@@ -345,7 +447,7 @@ export function BuilderDashboard() {
         </section>
 
         <section className="mt-6 grid gap-5">
-          {sprints.map((sprint) => (
+          {scheduledSprints.map((sprint) => (
             <SprintCard key={sprint.id} sprint={sprint} active={sprint.id === activeSprintId} />
           ))}
         </section>
