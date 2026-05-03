@@ -13,7 +13,7 @@ import {
   Wrench
 } from "lucide-react";
 import type { ElementType, ReactNode } from "react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import clsx from "clsx";
 import { END_DATE, START_DATE, coreSources, coverageMap, daysBetween, formatRange, sprints, toDate, type Sprint } from "@/lib/plan";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -70,17 +70,16 @@ function buildSchedule(startDate: string, endDate: string): ScheduledSprint[] {
   });
 }
 
-function currentSprintId(schedule: ScheduledSprint[], startDate: string, endDate: string) {
-  const now = new Date();
-  const active = schedule.find((sprint) => toDate(sprint.start) <= now && now <= toDate(sprint.end));
+function currentSprintId(schedule: ScheduledSprint[], startDate: string, endDate: string, todayKey: string) {
+  const active = schedule.find((sprint) => sprint.start <= todayKey && todayKey <= sprint.end);
   if (active) return active.id;
-  if (now < toDate(startDate)) return schedule[0]?.id ?? 1;
-  if (now > toDate(endDate)) return schedule.at(-1)?.id ?? 15;
+  if (todayKey < startDate) return schedule[0]?.id ?? 1;
+  if (todayKey > endDate) return schedule.at(-1)?.id ?? 15;
   return schedule[0]?.id ?? 1;
 }
 
-function remainingDays(endDate: string, planLength: number) {
-  const days = daysBetween(new Date(), toDate(endDate)) + 1;
+function remainingDays(todayKey: string, endDate: string, planLength: number) {
+  const days = daysBetween(toDate(todayKey), toDate(endDate)) + 1;
   return Math.min(Math.max(days, 0), planLength);
 }
 
@@ -304,13 +303,18 @@ function SprintCard({ sprint, active }: { sprint: Sprint; active: boolean }) {
 export function BuilderDashboard() {
   const [startDate, setStartDate] = useState(START_DATE);
   const [endDate, setEndDate] = useState(END_DATE);
+  const [todayKey, setTodayKey] = useState(START_DATE);
   const planLength = daysBetween(toDate(startDate), toDate(endDate)) + 1;
   const scheduledSprints = useMemo(() => buildSchedule(startDate, endDate), [startDate, endDate]);
-  const activeSprintId = currentSprintId(scheduledSprints, startDate, endDate);
+  const activeSprintId = currentSprintId(scheduledSprints, startDate, endDate, todayKey);
   const activeSprint = scheduledSprints.find((sprint) => sprint.id === activeSprintId) ?? scheduledSprints[0];
   const days = useMemo(() => calendarDays(startDate, endDate), [startDate, endDate]);
   const planLengthLabel = `${planLength} day${planLength === 1 ? "" : "s"}`;
   const dateRangeLabel = `${formatRange(startDate, endDate)} · ${planLengthLabel}`;
+
+  useEffect(() => {
+    setTodayKey(dateKey(new Date()));
+  }, []);
 
   function handleStartDateChange(value: string) {
     setStartDate(value);
@@ -345,7 +349,7 @@ export function BuilderDashboard() {
                 <Metric label="Roadmap length" value={planLengthLabel} icon={CalendarDays} accent="bg-brand-blue/10 text-brand-blue" />
                 <Metric label="Total sprints" value="15" icon={Target} accent="bg-brand-mint/20 text-emerald-600" />
                 <Metric label="Current sprint" value={`#${activeSprint.id}`} icon={Sparkles} accent="bg-brand-coral/20 text-red-500" />
-                <Metric label="Days remaining" value={`${remainingDays(endDate, planLength)}`} icon={Rocket} accent="bg-brand-gold/20 text-amber-600" />
+                <Metric label="Days remaining" value={`${remainingDays(todayKey, endDate, planLength)}`} icon={Rocket} accent="bg-brand-gold/20 text-amber-600" />
               </div>
             </div>
           </div>
